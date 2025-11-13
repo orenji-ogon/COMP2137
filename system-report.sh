@@ -89,6 +89,25 @@ if command -v ufw >/dev/null 2>&1; then
 else 
   UFW_STATUS="ufw not installed" 
 fi 
+# Battery Health
+BATTERY_INFO="No battery detected"
+for bat in /sys/class/power_supply/BAT*; do
+  if [ -d "$bat" ]; then
+    NAME="$(basename "$bat")"
+    STATUS="$(cat "$bat/status" 2>/dev/null || echo Unknown)"
+    CAPACITY="$(cat "$bat/capacity" 2>/dev/null || echo Unknown)%"
+    ENERGY_FULL="$(cat "$bat/energy_full" 2>/dev/null || cat "$bat/charge_full" 2>/dev/null || echo Unknown)"
+    ENERGY_DESIGN="$(cat "$bat/energy_full_design" 2>/dev/null || cat "$bat/charge_full_design" 2>/dev/null || echo Unknown)"
+    HEALTH="Unknown"
+    if [ "$ENERGY_FULL" != "Unknown" ] && [ "$ENERGY_DESIGN" != "Unknown" ]; then
+      HEALTH=$(awk -v full="$ENERGY_FULL" -v design="$ENERGY_DESIGN" 'BEGIN { if (design>0) printf("%.1f%%", (full/design)*100); else print "Unknown" }')
+    fi
+    BATTERY_INFO="Battery ${NAME}: Status=${STATUS}, Capacity=${CAPACITY}, Health=${HEALTH} (Full=${ENERGY_FULL}, Design=${ENERGY_DESIGN})"
+    break
+  fi
+done
+
+
 
 echo "==========================================================================="
 
@@ -120,6 +139,7 @@ Process Count: ${PROCESS_COUNT}
 Load Averages: ${LOAD_AVG} 
 Listening Network Ports: ${LISTEN_PORTS} 
 UFW Status: ${UFW_STATUS} 
+Battery: ${BATTERY_INFO}
 
 EOF
 echo "==========================================================================="
