@@ -21,6 +21,17 @@ error() {
 log "Checking netplan configuration for 192.168.16.21..."
 
 NETPLAN_FILE="/etc/netplan/01-netconfig.yaml"
+PRIMARY_FILE=$(basename "$NETPLAN_FILE")
+
+log "Checking for conflicting Netplan configuration files..."
+for file in /etc/netplan/*.yaml; do
+    base=$(basename "$file")
+    if [ "$base" != "$PRIMARY_FILE" ]; then
+        log "Disabling conflicting Netplan file: $base"
+        mv "$file" "/etc/netplan/${base}.bak" || { error "Failed to disable $base"; exit 1; }
+        success "$base has been backed up as ${base}.bak"
+    fi
+done
 
 if [ ! -f "$NETPLAN_FILE" ]; then
     log "Netplan file not found. Creating a basic one..."
@@ -34,10 +45,10 @@ network:
         addresses: [8.8.8.8,8.8.4.4]
       routes:
         - to: 0.0.0.0/0
-          via: 192.168.16.1
-
+          via: 192.168.16.2
 EOF
-    success "Netplan file created."
+	chmod 600 "$NETPLAN_FILE"
+	success "Netplan file created."
 fi
 
 if ! grep -q "192.168.16.21/24" "$NETPLAN_FILE"; then
