@@ -1,13 +1,10 @@
 #!/bin/bash
 
-
 # Make the script safe: stop on errors, undefined variables, or broken pipelines
 set -euo pipefail
 IFS=$'\n\t'
 
 # Logging functions
-exec > >(tee -a /var/log/server-setup.log) 2>&1
-
 log() {
     echo -e "\n[INFO] $1"
 }
@@ -20,22 +17,10 @@ error() {
     echo -e "\n[ERROR] $1" >&2
 }
 
-
 # Step 1: Configure Netplan
 log "Checking netplan configuration for 192.168.16.21..."
 
 NETPLAN_FILE="/etc/netplan/01-netconfig.yaml"
-PRIMARY_FILE=$(basename "$NETPLAN_FILE")
-
-log "Checking for conflicting Netplan configuration files..."
-for file in /etc/netplan/*.yaml; do
-    base=$(basename "$file")
-    if [ "$base" != "$PRIMARY_FILE" ]; then
-        log "Disabling conflicting Netplan file: $base"
-        mv "$file" "/etc/netplan/${base}.bak" || { error "Failed to disable $base"; exit 1; }
-        success "$base has been backed up as ${base}.bak"
-    fi
-done
 
 if [ ! -f "$NETPLAN_FILE" ]; then
     log "Netplan file not found. Creating a basic one..."
@@ -45,43 +30,56 @@ network:
   ethernets:
     eth0:
       addresses: [192.168.16.21/24]
+      gateway4: 192.168.16.1
       nameservers:
         addresses: [8.8.8.8,8.8.4.4]
       routes:
         - to: 0.0.0.0/0
           via: 192.168.16.1
+
 EOF
-    chmod 600 "$NETPLAN_FILE"
     success "Netplan file created."
 fi
 
 if ! grep -q "192.168.16.21/24" "$NETPLAN_FILE"; then
     log "Updating netplan configuration..."
     sed -i '/addresses:/c\      addresses: [192.168.16.21/24]' "$NETPLAN_FILE" || { error "Failed to update netplan file"; exit 1; }
-fi
-
-# Flush old IPs
-ip addr flush dev eth0
-
-# Safe Netplan apply with timed revert
-log "Applying Netplan configuration safely with timed revert..."
-echo "If you lose SSH access, wait 2 minutes for automatic rollback."
-echo -e "\nPress ENTER before the timeout to accept the new configuration"
-echo "Changes will revert in 120 seconds if not confirmed."
-
-if netplan try 2> /var/log/netplan-warning.log; then
-    success "Netplan configuration confirmed and applied permanently."
+    netplan apply || { error "Netplan apply failed"; exit 1; }
+    success "Netplan updated and applied."
 else
-    error "Netplan configuration was not confirmed. Reverting to previous settings."
-    exit 1
+    success "Netplan already correctly configured."
 fi
 
+# Step 2: Update /etc/hosts
+log "Checking /etc/hosts for correct entry for server1..."
 
-# Install Apache2 and squid
+if grep -q "server1" /etc/hosts && ! grep -q "192.168.16.21 server1" /etc/hosts; then
+    log "Removing outdated server1 entry..."
+    sed -i '/server1/d' /etc/hosts || { error "Failed to remove old server1 entry"; exit 1; }
+fi
+
+if ! grep -q "192.168.16.21 server1" /etc/hosts; then
+    echo "192.168.16.21 server1" >> /etc/hosts || { error "Failed to add server1 to /etc/hosts"; exit 1; }
+    success "/etc/hosts updated."
+else
+    success "/etc/hosts already correct."
+fi
+
+# Wait until DNS resolution succeeds
+#for i in {1..10}; do
+#   if ping -c1 archive.ubuntu.com &>/dev/null; then
+#        echo "[SUCCESS] DNS is working."
+#        break
+#    fi
+#    echo "[INFO] Waiting for DNS to settle..."
+#    sleep 3
+#done
+
+# Step 3: Install apache2 and squid
 log "Installing apache2 and squid..."
 
 for pkg in apache2 squid; do
-    if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
+    if ! dpkg -l | grep -qw "$pkg"; then
         log "Installing $pkg..."
         apt-get update && apt-get install -y "$pkg" || { error "Failed to install $pkg"; exit 1; }
         success "$pkg installed."
@@ -115,7 +113,7 @@ for user in "${USERS[@]}"; do
     chmod 600 "$AUTH_KEYS"
     chown -R "$user:$user" "$SSH_DIR"
 
-    #  Generate SSH keys if missing
+    # Generate SSH keys if missing
     if [ ! -f "$SSH_DIR/id_rsa.pub" ]; then
         sudo -u "$user" ssh-keygen -t rsa -N "" -f "$SSH_DIR/id_rsa" || { error "RSA keygen failed for $user"; exit 1; }
     fi
@@ -123,7 +121,7 @@ for user in "${USERS[@]}"; do
         sudo -u "$user" ssh-keygen -t ed25519 -N "" -f "$SSH_DIR/id_ed25519" || { error "ED25519 keygen failed for $user"; exit 1; }
     fi
 
-    #  Add public keys to authorized_keys
+    # Add public keys to authorized_keys
     for keyfile in "$SSH_DIR"/id_*.pub; do
         grep -qxF "$(cat "$keyfile")" "$AUTH_KEYS" || cat "$keyfile" >> "$AUTH_KEYS"
     done
