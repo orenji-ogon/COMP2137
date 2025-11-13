@@ -30,7 +30,6 @@ network:
   ethernets:
     eth0:
       addresses: [192.168.16.21/24]
-      gateway4: 192.168.16.1
       nameservers:
         addresses: [8.8.8.8,8.8.4.4]
       routes:
