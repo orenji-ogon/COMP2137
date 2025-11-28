@@ -1,7 +1,7 @@
-Warning: The unit file, source configuration file or drop-ins of netplan-ovs-cleanup.service changed on disk. Run 'systemctl daemon-reload' to reload units.
 WARNING:root:Cannot call Open vSwitch: ovsdb-server.service is not running.
 dpkg-preconfigure: unable to re-open stdin: No such file or directory
 Warning: Permanently added 'server1-mgmt' (ED25519) to the list of known hosts.
+WARNING:root:Cannot call Open vSwitch: ovsdb-server.service is not running.
 debconf: unable to initialize frontend: Dialog
 debconf: (TERM is not set, so the dialog frontend is not usable.)
 debconf: falling back to frontend: Readline
