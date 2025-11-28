@@ -37,43 +37,41 @@ if [ ! -f "$NETPLAN_FILE" ]; then
     log "Netplan file not found. Creating a basic one..."
     cat <<EOF > "$NETPLAN_FILE" || { error "Failed to create netplan file"; exit 1; }
 network:
-  version: 2
-  ethernets:
-    eth0:
-      addresses: [192.168.16.21/24]
-      nameservers:
-        addresses: [8.8.8.8,8.8.4.4]
-      routes:
-        - to: 0.0.0.0/0
-          via: 192.168.16.2
+    version: 2
+    renderer: networkd
+    ethernets:
+        eth0:
+            addresses: [192.168.16.21/24]
+            routes:
+              - to: default
+                via: 192.168.16.2
+            nameservers:
+                addresses: [192.168.16.2]
+                search: [home.arpa, localdomain]
+        eth1:
+            addresses: [172.16.1.241/24]
 EOF
 	chmod 600 "$NETPLAN_FILE"
 	success "Netplan file created."
-fi
 
-if ! grep -q "192.168.16.21/24" "$NETPLAN_FILE"; then
-    log "Updating netplan configuration..."
-    sed -i '/addresses:/c\      addresses: [192.168.16.21/24]' "$NETPLAN_FILE" || { error "Failed to update netplan file"; exit 1; }
-    netplan apply || { error "Netplan apply failed"; exit 1; }
-    success "Netplan updated and applied."
-else
-    success "Netplan already correctly configured."
+# Apply right after creation
+log "Applying netplan configuration..."
+netplan apply || { error "Netplan apply failed"; exit 1; }
+success "Netplan applied successfully."
+
 fi
 
 # Step 2: Update /etc/hosts
-log "Checking /etc/hosts for correct entry for server1..."
+log "Ensuring /etc/hosts has the correct entry for server1..."
 
-if grep -q "server1" /etc/hosts && ! grep -q "192.168.16.21 server1" /etc/hosts; then
-    log "Removing outdated server1 entry..."
-    sed -i '/server1/d' /etc/hosts || { error "Failed to remove old server1 entry"; exit 1; }
-fi
+# Remove any existing 'server1' line (but not server1-mgmt or others)
+sed -i '/server1$/d' /etc/hosts || { error "Failed to remove old server1 entry"; exit 1; }
 
-if ! grep -q "192.168.16.21 server1" /etc/hosts; then
-    echo "192.168.16.21 server1" >> /etc/hosts || { error "Failed to add server1 to /etc/hosts"; exit 1; }
-    success "/etc/hosts updated."
-else
-    success "/etc/hosts already correct."
-fi
+# Add the correct address mapping
+echo "192.168.16.21 server1" >> /etc/hosts || { error "Failed to add server1 entry"; exit 1; }
+
+success "/etc/hosts updated for server1"
+
 
 # Wait until DNS resolution succeeds
 #for i in {1..10}; do
@@ -85,17 +83,51 @@ fi
 #    sleep 3
 #done
 
-# Step 3: Install apache2 and squid
-log "Installing apache2 and squid..."
+# Step 3: Install apache2 and squid if missing, otherwise check status
+log "Checking apache2 and squid..."
+
+# Always refresh repo list once at the start
+apt-get update -qq || { error "Failed to update repo list"; exit 1; }
 
 for pkg in apache2 squid; do
-    if ! dpkg -l | grep -qw "$pkg"; then
-        log "Installing $pkg..."
-        apt-get update && apt-get install -y "$pkg" || { error "Failed to install $pkg"; exit 1; }
-        success "$pkg installed."
+    installed_version=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)	# installed_version is version that is currently running
+    newest_version=$(apt-cache policy "$pkg" | awk '/Candidate:/ {print $2}')	# newest_version is version that is available not installed
+
+    if [ -z "$installed_version" ]; then
+        log "$pkg not found. Installing..."
+        apt-get install -y "$pkg" || { error "Failed to install $pkg"; exit 1; }
+        installed_version=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null)
+        success "$pkg installed (version $installed_version)."
     else
-        success "$pkg already installed."
+        success "$pkg already installed (version $installed_version)."
+
+        # Check service is enabled
+        if systemctl is-enabled --quiet "$pkg"; then
+            success "$pkg service is enabled."
+        else
+            log "Enabling $pkg service..."
+            systemctl enable "$pkg" || error "Failed to enable $pkg"
+        fi
+
+        # Check service is running
+        if systemctl is-active --quiet "$pkg"; then
+            success "$pkg service is running."
+        else
+            log "Starting $pkg service..."
+            systemctl start "$pkg" || error "Failed to start $pkg"
+        fi
     fi
+
+    # Show version info
+    echo "-----------------------------------"
+    echo "$pkg installed version: ${installed_version:-not installed}"
+    echo "$pkg latest available version: $newest_version"
+    if [ "$installed_version" != "$newest_version" ]; then
+        echo "$pkg is out of date (installed: $installed_version, latest: $newest_version)"
+    else
+        echo "$pkg is up to date (version $installed_version)"
+    fi
+    echo "-----------------------------------"
 done
 
 # Step 4: Create users and SSH keys
