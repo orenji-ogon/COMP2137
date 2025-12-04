@@ -1,8 +1,7 @@
-
 #!/bin/bash
-# lab3.sh - Deploy configure-host.sh to servers and update local /etc/hosts
-# This runs on your desktop VM. It copies the config script to each server (containers),
-# runs it remotely via SSH, and then ensures your desktop VM's hosts file has the entries too.
+# lab3.sh - Deploys configure-host.sh to servers and updates local /etc/hosts
+# This will run on my desktop VM. It copies the config script into each server (container),
+# runs it remotely via SSH, and then ensures desktop VM's hosts file has the entries too.
 
 # ---------------------------
 # Debug / strict mode header
@@ -12,8 +11,8 @@ IFS=$'\n\t'
 trap 'echo "[ERROR] line=$LINENO cmd=$BASH_COMMAND status=$?"' ERR
 
 # PS4 controls the prefix for `set -x` trace lines. We guard against unset FUNCNAME at top-level.
-export PS4='+ ${BASH_SOURCE[0]:-lab3.sh}:${LINENO}:${FUNCNAME[0]:-main}: '
-set -x
+#export PS4='+ ${BASH_SOURCE[0]:-lab3.sh}:${LINENO}:${FUNCNAME[0]:-main}: '
+#set -x
 
 # ---------------------------
 # Parse -verbose flag from any position (safe with set -u)
@@ -56,7 +55,7 @@ runRemote() {
   local server="$1"
   local args="$2"
 
-  # Ensure our local script is executable (if working directory permissions allow)
+  # Ensure local script is executable - if working directory permissions allow
   [[ -x ./configure-host.sh ]] || chmod +x ./configure-host.sh
 
   echo "Deploying to ${server}..."
